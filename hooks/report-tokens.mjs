@@ -1,12 +1,17 @@
 /**
- * PostInvocation Hook — 每轮结束后在对话流末尾追加一条用量摘要。
+ * PostInvocation Hook — 可选的每轮用量摘要。
  *
- * 只读取 hook 传入的真实 transcriptPath，不做任何估算。
+ * 默认 **关闭**，原因有两个真实问题：
  *
- * tokens.mjs 可能有两处位置：
- *   1. ~/.gemini/config/sidecars/usage_monitor/lib/tokens.mjs   ← 顶层 sidecar（本项目安装方式）
- *   2. <plugin>/sidecars/<name>/lib/tokens.mjs                  ← 纯插件内打包方式
- * 按顺序探测，避免安装形态不同就静默失效。
+ *   1. 用 `systemMessage + metadata.user_markdown`（文档推荐、模型读不到）时，
+ *      语言服务器每轮都抛 `type mismatch: cannot convert string to message`
+ *      （见 language_server.log，连续 80 条，无一次成功），这条路径在本版本不可用。
+ *
+ *   2. 退而用 `userMessage` 能跑通，但它会被当成**真实用户消息**写进轨迹，
+ *      导致每轮上下文凭空增长、Token 消耗上升。这不是摘要该有的代价。
+ *
+ * 因此改成显式开关：settings.json 里 `{"hook":{"injectSummary":true}}` 才注入，
+ * 并沿用 `userMessage`（唯一验证可用的类型）。默认不注入。
  */
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -18,16 +23,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = dirname(__dirname);
 const CONFIG_ROOT = join(homedir(), '.gemini', 'config');
 
+const PANEL_LINK = '[打开面板](sidecar://usage-monitor/usage_panel/)';
+
 function findTokensModule() {
   const candidates = [
-    // 1) 顶层 sidecar（本项目的安装方式）
-    join(CONFIG_ROOT, 'sidecars', 'usage_monitor', 'lib', 'tokens.mjs'),
-    // 2) 插件内打包
+    join(CONFIG_ROOT, 'plugins', 'usage-monitor', 'sidecars', 'usage_panel', 'lib', 'tokens.mjs'),
     join(PLUGIN_ROOT, 'sidecars', 'usage_panel', 'lib', 'tokens.mjs'),
     join(PLUGIN_ROOT, 'lib', 'tokens.mjs'),
   ];
 
-  // 3) 兜底：扫描插件 sidecars/*/lib/tokens.mjs
   const sidecarsDir = join(PLUGIN_ROOT, 'sidecars');
   if (existsSync(sidecarsDir)) {
     try {
@@ -58,16 +62,9 @@ function readStdin() {
   }
 }
 
-function emit(md) {
-  process.stdout.write(JSON.stringify({
-    injectSteps: [{
-      systemMessage: {
-        systemMessage: '',
-        metadata: { user_markdown: md },
-      },
-    }],
-    terminationBehavior: '',
-  }));
+/** 输出空结果，什么都不注入。 */
+function emitNothing() {
+  process.stdout.write(JSON.stringify({ injectSteps: [] }));
 }
 
 async function main() {
@@ -76,45 +73,35 @@ async function main() {
   const transcriptPath = payload.transcriptPath;
 
   const tokensPath = findTokensModule();
-
-  // 找不到解析模块时不输出任何内容，而不是打印一个假数字
-  if (!tokensPath) {
-    emit('> 📊 用量统计：未找到 tokens.mjs，请重新安装插件');
-    return;
-  }
+  if (!tokensPath) return emitNothing();
 
   const { parseTranscript, readSettings } = await import(pathToFileURL(tokensPath).href);
 
-  let text = '';
+  // 默认关闭：注入摘要会作为真实用户消息进入轨迹并推高上下文
+  const settings = readSettings();
+  if (settings?.hook?.injectSummary !== true) return emitNothing();
 
-  if (transcriptPath) {
-    const parsed = parseTranscript(convId, transcriptPath);
-    const lastTurn = parsed?.turns?.[parsed.turns.length - 1];
+  if (!transcriptPath) return emitNothing();
 
-    if (lastTurn) {
-      const parts = [
-        `本轮 ${fmt(lastTurn.totalTokens)}`,
-        `In ${fmt(lastTurn.inputTokens)}`,
-        `Out ${fmt(lastTurn.outputTokens)}`,
-        `Cache ${fmt(lastTurn.cacheReadTokens)}`,
-      ];
-      if (lastTurn.phaseSummary) parts.push(lastTurn.phaseSummary);
-      if (lastTurn.durationSec) parts.push(`${lastTurn.durationSec}s`);
-      if (lastTurn.toolCalls) parts.push(`${lastTurn.toolCalls} 工具`);
+  const parsed = parseTranscript(convId, transcriptPath);
+  const lastTurn = parsed?.turns?.[parsed.turns.length - 1];
+  if (!lastTurn) return emitNothing();
 
-      if (readSettings().hook.showSessionTotal && parsed) {
-        parts.push(`会话累计 ${fmt(parsed.totalTokens)}`);
-      }
-
-      text = `📊 ${parts.join(' · ')}`;
-    } else if (parsed) {
-      text = `📊 会话累计 ${fmt(parsed.totalTokens)}`;
-    }
+  const parts = [
+    `本轮 ${fmt(lastTurn.totalTokens)}`,
+    `In ${fmt(lastTurn.inputTokens)}`,
+    `Out ${fmt(lastTurn.outputTokens)}`,
+    `Cache ${fmt(lastTurn.cacheReadTokens)}`,
+  ];
+  if (lastTurn.toolCalls) parts.push(`${lastTurn.toolCalls} 工具`);
+  if (settings.hook.showSessionTotal !== false && parsed) {
+    parts.push(`会话累计 ${fmt(parsed.totalTokens)}`);
   }
 
-  if (!text) text = '📊 用量统计就绪';
-
-  emit(`> ${text} · [打开面板](sidecar://usage_monitor/)`);
+  process.stdout.write(JSON.stringify({
+    injectSteps: [{ userMessage: `📊 ${parts.join(' · ')} · ${PANEL_LINK}` }],
+    terminationBehavior: '',
+  }));
 }
 
-main();
+main().catch(() => emitNothing());

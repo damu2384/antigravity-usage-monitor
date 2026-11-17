@@ -25,7 +25,11 @@ export const DEFAULT_QUOTA = {
 };
 
 export const DEFAULT_SETTINGS = {
-  hook: { showSessionTotal: true },
+  hook: {
+    showSessionTotal: true,
+    // 默认不注入每轮摘要：注入内容会作为真实用户消息进入轨迹并推高上下文
+    injectSummary: false,
+  },
 };
 
 const cache = new Map(); // filePath -> { mtimeMs, size, parsed }
@@ -76,6 +80,7 @@ export function readSettings() {
   return {
     hook: {
       showSessionTotal: typeof h.showSessionTotal === 'boolean' ? h.showSessionTotal : DEFAULT_SETTINGS.hook.showSessionTotal,
+      injectSummary: typeof h.injectSummary === 'boolean' ? h.injectSummary : DEFAULT_SETTINGS.hook.injectSummary,
     },
   };
 }
@@ -86,6 +91,7 @@ export function writeSettings(next) {
   return writeJson(SETTINGS_PATH, {
     hook: {
       showSessionTotal: typeof h.showSessionTotal === 'boolean' ? h.showSessionTotal : cur.hook.showSessionTotal,
+      injectSummary: typeof h.injectSummary === 'boolean' ? h.injectSummary : cur.hook.injectSummary,
     },
   });
 }
