@@ -1,7 +1,12 @@
 {
   "name": "usage-monitor",
-  "displayName": "Token与用量实时监控",
-  "description": "在 Antigravity 侧边栏实时监控任意会话的 Token 消耗、缓存命中率、上下文增长曲线及请求构成拆解看板。",
-  "version": "1.0.0",
-  "author": "Antigravity User"
+  "displayName": "Antigravity 全能用量监控套件",
+  "description": "三位一体架构：在侧边栏实时监控真实 Token 消耗、缓存命中率、Subagent 聚合、7D/24H时序及自然轮次拆解，支持 PostInvocation 轮次自动播报与自然语言查账。",
+  "version": "2.0.0",
+  "author": "damu2384",
+  "homepage": "https://github.com/damu2384/antigravity-usage-monitor",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/damu2384/antigravity-usage-monitor"
+  }
 }

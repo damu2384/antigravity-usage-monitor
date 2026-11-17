@@ -1,0 +1,11 @@
+{
+  "usage-reporter": {
+    "enabled": true,
+    "PostInvocation": [
+      {
+        "command": "node hooks/report-tokens.mjs",
+        "timeout": 5
+      }
+    ]
+  }
+}

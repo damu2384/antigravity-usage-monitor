@@ -3,7 +3,7 @@
   "args": ["main.mjs"],
   "restart_policy": "always",
   "display_name": "用量监控",
-  "description": "实时展示会话 Token 消耗、缓存命中率、上下文增长曲线及请求拆解看板。",
+  "description": "实时展示会话 Token 消耗、缓存命中率、上下文增长曲线、7D/24H时序及自然轮次拆解看板。",
   "has_web_ui": true,
   "agent_permissions": {
     "allows_user_interactions": false
