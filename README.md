@@ -42,10 +42,10 @@ Antigravity 在 `transcript.jsonl` 的 `PLANNER_RESPONSE` 步里记录了以下�
 
 自动读取 `.system_generated/subagents/*.json` 与 `.system_generated/swarm/members.json`，把子会话的用量递归归集到根任务（带环检测），并在轮次列表里以 `[子代理 · <角色>]` 标注其独立占比。
 
-### 4. 三位一体形态
+### 4. 形态
 
-- **Sidecar 面板**：右侧辅助面板中的完整 UI。
-- **PostInvocation Hook**：每轮结束后在对话流末尾追加一行摘要（本轮 / In / Out / Cache / 阶段 / 耗时 / 会话累计），附带打开面板的链接；可在设置中关闭「会话累计」。
+- **Sidecar 面板**：右侧辅助面板中的完整 UI（**装在顶层目录，侧边栏一级菜单项，单击直达**）。
+- **PostInvocation Hook**：每轮结束后在对话流末尾追加一行摘要（本轮 / In / Out / Cache / 阶段 / 耗时 / 工具数 / 会话累计），附带打开面板的链接；可在设置中关闭「会话累计」。
 - **Skill**：让 Agent 能用自然语言查账，并明确约束它不得编造 TTFT 或提示词拆分。
 
 ### 5. 性能
@@ -58,34 +58,49 @@ Antigravity 在 `transcript.jsonl` 的 `PLANNER_RESPONSE` 步里记录了以下�
 
 ## 安装
 
-克隆到 Antigravity 的插件目录：
+> [!IMPORTANT]
+> **面板必须装成顶层 sidecar，不要放进 `plugins/`。**
+>
+> 这是实测得出的：sidecar 若位于 `plugins/<plugin>/sidecars/<name>/`，平台会把它归入
+> 侧边栏的 **Extensions** 折叠组，打开面板要多点两步。
+> 放在 `~/.gemini/config/sidecars/<name>/` 则是**一级菜单项，单击直达**。
+>
+> 正确布局：
+> - 面板 → `~/.gemini/config/sidecars/usage_monitor/`
+> - Hook / Skill → `~/.gemini/config/plugins/usage-monitor/`
 
-```bash
-git clone https://github.com/damu2384/antigravity-usage-monitor.git \
-  ~/.gemini/config/plugins/usage-monitor
-```
-
-Windows：
+一键安装（会装到上述两个正确位置）：
 
 ```powershell
-git clone https://github.com/damu2384/antigravity-usage-monitor.git "$env:USERPROFILE\.gemini\config\plugins\usage-monitor"
+# Windows
+.\install.bat
 ```
 
-要求 **Node.js 18+**（ES Module 支持）。然后在 Antigravity 的 Customizations / 插件页启用 `usage-monitor`。
+```bash
+# macOS / Linux
+bash install.sh
+```
 
-也可以直接运行仓库中的 `install.bat`（Windows）或 `install.sh`（macOS / Linux）完成复制。
+要求 **Node.js 18+**（ES Module 支持）。安装后重启 Antigravity，侧边栏菜单会出现一级项「用量」。
+
+手动安装：
+
+| 内容 | 目标位置 |
+| :--- | :--- |
+| `sidecars/usage_monitor/` | `~/.gemini/config/sidecars/usage_monitor/` |
+| `plugin.json`、`hooks.json`、`hooks/`、`skills/`、`assets/` | `~/.gemini/config/plugins/usage-monitor/` |
 
 ---
 
 ## 使用
 
-在任意对话中打开面板：
+侧边栏菜单点击「用量」即可打开，或在任意对话中输出：
 
 ```
-[用量监控](sidecar://usage-monitor/usage_panel/)
+[用量监控](sidecar://usage_monitor/)
 ```
 
-或直接问 Agent：
+也可以直接问 Agent：
 
 - 「当前会话一共用了多少 Token？」
 - 「哪个会话消耗最多？」
@@ -97,12 +112,12 @@ git clone https://github.com/damu2384/antigravity-usage-monitor.git "$env:USERPR
 
 ```text
 usage-monitor/
-├── plugin.json
+├── plugin.json                      # 插件清单（Hook + Skill）
 ├── hooks.json
 ├── assets/logo.svg
 ├── hooks/report-tokens.mjs          # 每轮摘要 Hook
 ├── skills/usage-monitor/SKILL.md    # 自然语言查账
-└── sidecars/usage_panel/
+└── sidecars/usage_monitor/          # → 复制到 ~/.gemini/config/sidecars/
     ├── sidecar.json
     ├── package.json
     ├── main.mjs                     # HTTP 服务 + /api/tokens
@@ -118,7 +133,7 @@ usage-monitor/
 
 - 只读本地文件：`~/.gemini/antigravity/brain/<id>/.system_generated/logs/transcript.jsonl`，以及 `ANTIGRAVITY_APP_DATA`、`antigravity-ide`、`antigravity-cli` 下对应的 brain 目录（存在时）。
 - 全部解析与渲染在本地完成，不向任何外部服务发送数据。
-- 面板设置在插件目录的 `quota.json` / `settings.json`（已加入 `.gitignore`）。
+- 面板设置在 sidecar 目录的 `quota.json` / `settings.json`（已加入 `.gitignore`）。
 
 ---
 

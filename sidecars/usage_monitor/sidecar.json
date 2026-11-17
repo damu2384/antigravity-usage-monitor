@@ -2,14 +2,14 @@
   "command": "node",
   "args": ["main.mjs"],
   "restart_policy": "always",
-  "display_name": "用量监控",
+  "display_name": "用量",
   "description": "按会话与轮次展示真实 Token 消耗（输入 / 输出 / 缓存读取）、缓存命中率、5 小时与本周额度窗口。",
   "has_web_ui": true,
   "agent_permissions": {
     "allows_user_interactions": false
   },
   "ui_config": {
-    "display_name": "用量监控",
+    "display_name": "用量",
     "views": [
       {
         "path": "/",

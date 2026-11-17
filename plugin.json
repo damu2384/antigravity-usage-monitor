@@ -1,12 +1,12 @@
 {
   "name": "usage-monitor",
   "displayName": "用量监控",
-  "description": "按会话与轮次统计 Antigravity 的真实 Token 消耗（输入 / 输出 / 缓存读取）、缓存命中率与额度窗口，支持侧边栏面板、每轮摘要与自然语言查账。",
-  "version": "1.0.0",
+  "description": "为 Antigravity 提供每轮 Token 摘要 Hook 与自然语言查账 Skill。侧边栏面板请用顶层 sidecar（sidecar://usage_monitor/）。",
+  "version": "3.1.0",
   "author": "Damu",
   "suggestedPrompts": [
     "当前会话一共用了多少 Token？",
     "哪个会话消耗最多，帮我列出来",
-    "打开用量面板"
+    "这周我用了多少？"
   ]
 }
