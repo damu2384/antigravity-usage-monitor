@@ -1,0 +1,7 @@
+{
+  "name": "usage-panel",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Usage monitor sidecar panel",
+  "private": true
+}

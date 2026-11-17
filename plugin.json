@@ -1,12 +1,12 @@
 {
   "name": "usage-monitor",
-  "displayName": "Antigravity 全能用量监控套件",
-  "description": "三位一体架构：在侧边栏实时监控真实 Token 消耗、缓存命中率、Subagent 聚合、7D/24H时序及自然轮次拆解，支持 PostInvocation 轮次自动播报与自然语言查账。",
-  "version": "2.0.0",
-  "author": "damu2384",
-  "homepage": "https://github.com/damu2384/antigravity-usage-monitor",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/damu2384/antigravity-usage-monitor"
-  }
+  "displayName": "用量监控",
+  "description": "按会话与轮次统计 Antigravity 的真实 Token 消耗（输入 / 输出 / 缓存读取）、缓存命中率与额度窗口，支持侧边栏面板、每轮摘要与自然语言查账。",
+  "version": "1.0.0",
+  "author": "Damu",
+  "suggestedPrompts": [
+    "当前会话一共用了多少 Token？",
+    "哪个会话消耗最多，帮我列出来",
+    "打开用量面板"
+  ]
 }

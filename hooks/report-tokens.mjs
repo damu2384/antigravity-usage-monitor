@@ -1,82 +1,76 @@
 /**
- * PostInvocation Hook: 每轮交互结束自动在聊天流中输出用量播报与直达链接
+ * PostInvocation Hook — 每轮结束后在对话流末尾追加一条用量摘要。
+ *
+ * 只读取 hook 传入的真实 transcriptPath，不做任何估算。
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseTranscript, readSettings } from '../sidecars/usage_panel/lib/tokens.mjs';
 
-function formatNum(num) {
-  if (!num) return '0';
-  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-  if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-  return num.toLocaleString();
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PLUGIN_ROOT = dirname(__dirname);
+
+function fmt(n) {
+  const num = Number(n) || 0;
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(2)}M`;
+  if (num >= 10_000) return `${(num / 1_000).toFixed(1)}k`;
+  return num.toLocaleString('en-US');
 }
 
-async function main() {
-  let inputData = '';
-  process.stdin.setEncoding('utf-8');
-
-  for await (const chunk of process.stdin) {
-    inputData += chunk;
-  }
-
-  if (!inputData.trim()) {
-    console.log(JSON.stringify({ injectSteps: [] }));
-    return;
-  }
-
+function readStdin() {
   try {
-    const payload = JSON.parse(inputData);
-    const transcriptPath = payload.transcriptPath;
-
-    if (!transcriptPath || !existsSync(transcriptPath)) {
-      console.log(JSON.stringify({ injectSteps: [] }));
-      return;
-    }
-
-    const content = readFileSync(transcriptPath, 'utf-8');
-    const lines = content.split('\n').filter(l => l.trim().length > 0);
-
-    let lastPlanner = null;
-    for (let i = lines.length - 1; i >= 0; i--) {
-      try {
-        const obj = JSON.parse(lines[i]);
-        if (obj.type === 'PLANNER_RESPONSE') {
-          lastPlanner = obj;
-          break;
-        }
-      } catch {}
-    }
-
-    if (!lastPlanner) {
-      console.log(JSON.stringify({ injectSteps: [] }));
-      return;
-    }
-
-    const inTok = lastPlanner.input_tokens || 0;
-    const outTok = lastPlanner.output_tokens || 0;
-    const cacheTok = lastPlanner.cache_read_tokens || 0;
-    const total = inTok + cacheTok;
-    const cacheRate = total > 0 ? ((cacheTok / total) * 100).toFixed(1) : '0.0';
-
-    const markdown = `📊 **本轮用量播报**: 输入 \`${formatNum(inTok)}\` · 输出 \`${formatNum(outTok)}\` · 缓存命中 \`${cacheRate}%\` (读 ${formatNum(cacheTok)}) | [📊 打开用量看板](sidecar://usage_monitor/)`;
-
-    const response = {
-      injectSteps: [
-        {
-          systemMessage: {
-            systemMessage: "",
-            metadata: {
-              user_markdown: markdown
-            }
-          }
-        }
-      ]
-    };
-
-    console.log(JSON.stringify(response));
-  } catch (err) {
-    console.log(JSON.stringify({ injectSteps: [] }));
+    const raw = readFileSync(0, 'utf-8');
+    return raw.trim() ? JSON.parse(raw) : {};
+  } catch {
+    return {};
   }
+}
+
+function main() {
+  const payload = readStdin();
+  const convId = payload.conversationId || 'unknown';
+  const transcriptPath = payload.transcriptPath;
+
+  let text;
+  if (transcriptPath) {
+    const parsed = parseTranscript(convId, transcriptPath);
+    const lastTurn = parsed?.turns?.[parsed.turns.length - 1];
+
+    if (lastTurn) {
+      const parts = [
+        `本轮 ${fmt(lastTurn.totalTokens)}`,
+        `In ${fmt(lastTurn.inputTokens)}`,
+        `Out ${fmt(lastTurn.outputTokens)}`,
+        `Cache ${fmt(lastTurn.cacheReadTokens)}`,
+      ];
+      if (lastTurn.phaseSummary) parts.push(lastTurn.phaseSummary);
+      if (lastTurn.durationSec) parts.push(`${lastTurn.durationSec}s`);
+
+      if (readSettings().hook.showSessionTotal && parsed) {
+        parts.push(`会话累计 ${fmt(parsed.totalTokens)}`);
+      }
+
+      text = `📊 ${parts.join(' · ')}`;
+    } else if (parsed) {
+      text = `📊 会话累计 ${fmt(parsed.totalTokens)}`;
+    }
+  }
+
+  if (!text) text = '📊 用量统计就绪';
+
+  const md = `> ${text} · [打开面板](sidecar://usage-monitor/usage_panel/)`;
+
+  process.stdout.write(JSON.stringify({
+    injectSteps: [{
+      systemMessage: {
+        systemMessage: '',
+        metadata: { user_markdown: md },
+      },
+    }],
+    terminationBehavior: '',
+  }));
 }
 
 main();

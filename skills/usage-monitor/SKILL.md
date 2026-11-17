@@ -1,24 +1,34 @@
 ---
 name: usage-monitor
-description: 查询和分析 Antigravity 会话的 Token 用量、缓存命中率、交互轮次及模型消耗开销。当用户询问“查账”、“用了多少Token”、“各会话消耗”、“费用分析”时激活此技能。
+description: 查询 Antigravity 会话的 Token 用量（输入 / 输出 / 缓存读取）、缓存命中率、模型调用次数与轮次明细，或打开用量面板。当用户问“我用了多少 Token”“哪个会话最费”“查一下用量”时使用。
 ---
 
-# 用量监控与自然语言查账技能 (Usage Monitor Skill)
+# 用量监控
 
-本技能赋予助手精确读取、统计并分析当前会话及全局所有会话 Token 消耗的能力。
+Antigravity 把每一步的真实 token 计数写在会话日志里：
 
-## 何时激活
-- 用户询问 Token 用量（如：“我当前用了多少 Token？”、“今天消耗了多少？”、“查账”）。
-- 用户询问各任务开销对比（如：“哪个会话用的 Token 最多？”、“帮我分析下各轮次的消耗”）。
-- 用户需要打开用量可视化看板。
+```
+~/.gemini/antigravity/brain/<conversationId>/.system_generated/logs/transcript.jsonl
+```
 
-## 执行操作指南
+`PLANNER_RESPONSE` 步包含 `input_tokens`、`output_tokens`、`cache_read_tokens`、`created_at` 与 `tool_calls`。**只有这些是真实可得的**。
 
-1. **读取数据源**：
-   - 当前会话日志位于：`~/.gemini/antigravity/brain/<当前会话ID>/.system_generated/logs/transcript.jsonl`
-   - 全局会话目录位于：`~/.gemini/antigravity/brain/`
-2. **汇报格式要求**：
-   - 必须提供**100% 真实数据**：输入 Tokens、输出 Tokens、缓存读取 Tokens、缓存命中率。
-   - 标注当前会话包含的自然交互轮次、规划/执行步数以及工具调用次数。
-   - 在回答末尾附带侧边栏看板入口：
-     `[👉 在侧边栏打开完整用量看板](sidecar://usage_monitor/)`
+## 查账方法
+
+优先用 Node 直接解析日志（跨平台、无需额外依赖）：
+
+```bash
+node -e "
+const {collectConversations}=await import('file://' + process.env.PLUGIN_ROOT + '/sidecars/usage_panel/lib/tokens.mjs');
+const all=collectConversations();
+for(const c of all.slice(0,10)) console.log(c.totalTokens, c.inputTokens, c.outputTokens, c.cacheReadTokens, c.title.slice(0,40));
+" --input-type=module
+```
+
+如果是查当前会话，把 `<conversationId>` 换成当前会话 ID，直接读单个文件即可。
+
+## 汇报要求
+
+- 只报真实字段：输入、输出、缓存读取、总令牌、调用次数、轮次。
+- **不要**声称能给出首字耗时（TTFT）或提示词按「系统/规则/工具/历史/结果」的精确拆分 —— transcript 里没有这些信息，任何这类数字都是编的。
+- 需要时把用户引到面板：`[用量面板](sidecar://usage-monitor/usage_panel/)`

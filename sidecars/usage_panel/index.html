@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>用量监控</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+  <!-- ============ 顶栏 ============ -->
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 20h18"/><rect x="4" y="11" width="3.5" height="6" rx="1"/><rect x="10.2" y="6" width="3.5" height="11" rx="1"/><rect x="16.5" y="13" width="3.5" height="4" rx="1"/>
+        </svg>
+      </div>
+      <div style="min-width:0">
+        <div class="brand-title">用量监控</div>
+        <div class="brand-sub" id="brand-sub">加载中…</div>
+      </div>
+    </div>
+
+    <div class="seg" role="tablist">
+      <button class="seg-btn active" data-tab="current" role="tab" aria-selected="true">当前</button>
+      <button class="seg-btn" data-tab="history" role="tab" aria-selected="false">全部</button>
+    </div>
+
+    <div class="live-pill" id="live-pill" title="每 3 秒自动刷新">
+      <span class="live-dot"></span><span>实时</span>
+    </div>
+
+    <button class="icon-btn" id="settings-btn" aria-expanded="false" aria-label="设置" title="设置">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.6.66 1.05 1.28 1.09H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- ============ 设置抽屉 ============ -->
+  <div class="settings" id="settings-panel" hidden>
+    <div class="settings-row">
+      <label for="opt-session-total">Hook 摘要显示「会话累计」</label>
+      <input type="checkbox" id="opt-session-total">
+    </div>
+    <div class="settings-row">
+      <label for="opt-limit-5h">5 小时额度上限（token）</label>
+      <input type="number" id="opt-limit-5h" min="1000" step="100000">
+    </div>
+    <div class="settings-row">
+      <label for="opt-limit-week">本周额度上限（token）</label>
+      <input type="number" id="opt-limit-week" min="1000" step="1000000">
+    </div>
+    <div class="settings-row">
+      <label for="opt-count-mode">额度统计口径</label>
+      <select class="select" id="opt-count-mode">
+        <option value="billed">仅计费（输入 + 输出）</option>
+        <option value="total">总计（含缓存读取）</option>
+      </select>
+    </div>
+    <div class="settings-foot" id="settings-status">额度上限请按你的实际套餐填写，本地保存，不上传。</div>
+  </div>
+
+  <!-- ============ 视图：当前会话 ============ -->
+  <div class="view active" id="view-current">
+    <div id="current-banner"></div>
+    <div class="stat-grid" id="current-cards"></div>
+    <div id="current-chart"></div>
+    <div class="card" id="current-turns-card">
+      <div class="turns-head">
+        <span class="card-title">按轮次明细</span>
+        <span class="faint" id="turn-count"></span>
+      </div>
+      <div id="turns-list"></div>
+    </div>
+  </div>
+
+  <!-- ============ 视图：全部会话 ============ -->
+  <div class="view" id="view-history">
+    <div class="stat-grid" id="global-cards"></div>
+    <div id="quota-card"></div>
+    <div class="card" id="trend-card"></div>
+    <div class="toolbar">
+      <input class="input" id="search-input" type="search" placeholder="搜索标题或会话 ID…" autocomplete="off">
+      <select class="select" id="sort-select">
+        <option value="recent">最近活跃</option>
+        <option value="total">总用量</option>
+        <option value="billed">非缓存用量</option>
+      </select>
+    </div>
+    <div class="card">
+      <div class="turns-head">
+        <span class="card-title">会话列表</span>
+        <span class="faint" id="conv-count"></span>
+      </div>
+      <div id="history-list"></div>
+    </div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>

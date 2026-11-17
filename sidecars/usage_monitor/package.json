@@ -1,6 +1,0 @@
-{
-  "name": "usage_monitor",
-  "version": "2.0.0",
-  "type": "module",
-  "description": "Antigravity usage and token monitor sidecar"
-}
