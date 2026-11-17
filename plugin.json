@@ -1,0 +1,7 @@
+{
+  "name": "usage-monitor",
+  "displayName": "Token与用量实时监控",
+  "description": "在 Antigravity 侧边栏实时监控任意会话的 Token 消耗、缓存命中率、上下文增长曲线及请求构成拆解看板。",
+  "version": "1.0.0",
+  "author": "Antigravity User"
+}
