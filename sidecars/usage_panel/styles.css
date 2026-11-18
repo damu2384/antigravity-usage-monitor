@@ -345,13 +345,66 @@ body {
 
 /* ---------- 折线 / 面积图 ---------- */
 
-.chart-wrap {
-  position: relative;
-  width: 100%;
-  height: 116px;
+.chart-stage {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+  height: 112px;
   background: var(--bg-subtle);
   border-radius: var(--radius-sm);
-  padding: 3px;
+  padding: 6px 8px 6px 6px;
+}
+
+.chart-yaxis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  flex-shrink: 0;
+  min-width: 26px;
+}
+
+.chart-plot {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.chart-plot svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.chart-dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c-cache);
+  border: 1.5px solid var(--bg-card);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.chart-hits {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+
+.chart-hit {
+  flex: 1;
+  height: 100%;
+  cursor: crosshair;
+}
+
+.chart-hit:hover {
+  background: color-mix(in srgb, var(--c-cache) 8%, transparent);
 }
 
 .chart-axis-labels {
@@ -359,7 +412,7 @@ body {
   justify-content: space-between;
   font-size: 9px;
   color: var(--text-faint);
-  padding: 3px 6px 0;
+  padding: 4px 2px 0 32px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -367,10 +420,10 @@ body {
 
 .bars {
   display: flex;
-  align-items: flex-end;
+  align-items: stretch;
   gap: 3px;
-  height: 96px;
-  padding-top: 12px;
+  height: 102px;
+  padding-top: 14px;
 }
 
 .bars-col {
@@ -379,10 +432,18 @@ body {
   height: 100%;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
   align-items: center;
   position: relative;
   cursor: default;
+}
+
+.bars-wrap {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: flex-end;
+  position: relative;
 }
 
 .bars-stack {
@@ -406,6 +467,9 @@ body {
 }
 
 .bars-label {
+  height: 14px;
+  line-height: 14px;
+  flex-shrink: 0;
   font-size: 8.5px;
   color: var(--text-faint);
   margin-top: 3px;
@@ -420,7 +484,9 @@ body {
 
 .bars-val {
   position: absolute;
-  top: -11px;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
   font-size: 8.5px;
   font-weight: 600;
   color: var(--text-dim);
@@ -429,20 +495,57 @@ body {
   pointer-events: none;
 }
 
+.trend-foot {
+  margin-top: 5px;
+  min-height: 15px;
+  font-size: 9.5px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 常用工具条 ---------- */
+
+.tools-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.tool-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-size: 9.5px;
+  font-family: var(--mono);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.tool-pill b {
+  color: var(--text);
+  font-weight: 600;
+}
+
 /* ---------- 轮次列表 ---------- */
 
 .turns-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding-bottom: 7px;
-  margin-bottom: 7px;
+  padding-bottom: 6px;
+  margin-bottom: 5px;
   border-bottom: 1px solid var(--border);
   font-size: 10.5px;
 }
 
 .turn {
-  padding: 7px 0;
+  padding: 5px 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -454,7 +557,7 @@ body {
   justify-content: space-between;
   align-items: baseline;
   gap: 8px;
-  margin-bottom: 3px;
+  margin-bottom: 2px;
 }
 
 .turn-title {
@@ -478,10 +581,10 @@ body {
 .turn-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 8px;
+  gap: 2px 7px;
   font-size: 9.5px;
   color: var(--text-faint);
-  margin-bottom: 4px;
+  margin-bottom: 3px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -510,15 +613,19 @@ body {
   color: var(--c-ok);
 }
 
+.tag-err {
+  background: color-mix(in srgb, var(--c-danger) 14%, transparent);
+  color: var(--c-danger);
+}
+
 /* ---------- 会话列表 ---------- */
 
 .conv {
-  padding: 8px 0;
+  padding: 6px 4px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   transition: background .12s;
   border-radius: var(--radius-sm);
-  padding-inline: 4px;
   margin-inline: -4px;
 }
 
@@ -605,6 +712,7 @@ body {
 
 .settings {
   margin-top: 8px;
+  margin-bottom: 8px;
   padding: 9px 11px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -621,6 +729,9 @@ body {
   gap: 10px;
   padding: 4px 0;
 }
+
+.settings-row.is-disabled { opacity: .45; }
+.settings-row.is-disabled label { cursor: not-allowed; }
 
 .settings-row label { color: var(--text-dim); cursor: pointer; }
 

@@ -10,8 +10,7 @@
  *   2. 退而用 `userMessage` 能跑通，但它会被当成**真实用户消息**写进轨迹，
  *      导致每轮上下文凭空增长、Token 消耗上升。这不是摘要该有的代价。
  *
- * 因此改成显式开关：settings.json 里 `{"hook":{"injectSummary":true}}` 才注入，
- * 并沿用 `userMessage`（唯一验证可用的类型）。默认不注入。
+ * 因此默认关闭；只有 settings.json 中 `{"hook":{"injectSummary":true}}` 时才加载解析模块并注入。
  */
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -27,8 +26,8 @@ const PANEL_LINK = '[打开面板](sidecar://usage-monitor/usage_panel/)';
 
 function findTokensModule() {
   const candidates = [
-    join(CONFIG_ROOT, 'plugins', 'usage-monitor', 'sidecars', 'usage_panel', 'lib', 'tokens.mjs'),
     join(PLUGIN_ROOT, 'sidecars', 'usage_panel', 'lib', 'tokens.mjs'),
+    join(CONFIG_ROOT, 'plugins', 'usage-monitor', 'sidecars', 'usage_panel', 'lib', 'tokens.mjs'),
     join(PLUGIN_ROOT, 'lib', 'tokens.mjs'),
   ];
 
@@ -44,6 +43,19 @@ function findTokensModule() {
   }
 
   return candidates.find((p) => existsSync(p)) || null;
+}
+
+/**
+ * 零依赖快速读取 settings.json，未开启时直接跳过动态 import(tokens.mjs)
+ */
+function quickReadSettings(tokensPath) {
+  const sidecarRoot = dirname(dirname(tokensPath));
+  const settingsPath = join(sidecarRoot, 'settings.json');
+  try {
+    return JSON.parse(readFileSync(settingsPath, 'utf-8'));
+  } catch {
+    return null;
+  }
 }
 
 function fmt(n) {
@@ -62,26 +74,26 @@ function readStdin() {
   }
 }
 
-/** 输出空结果，什么都不注入。 */
 function emitNothing() {
   process.stdout.write(JSON.stringify({ injectSteps: [] }));
 }
 
 async function main() {
-  const payload = readStdin();
-  const convId = payload.conversationId || 'unknown';
-  const transcriptPath = payload.transcriptPath;
-
   const tokensPath = findTokensModule();
   if (!tokensPath) return emitNothing();
 
-  const { parseTranscript, readSettings } = await import(pathToFileURL(tokensPath).href);
+  // 快速短路：未显式开启时，直接返回空结果，避免解析 stdin 与加载整个模块
+  const quick = quickReadSettings(tokensPath);
+  if (quick?.hook?.injectSummary !== true) return emitNothing();
 
-  // 默认关闭：注入摘要会作为真实用户消息进入轨迹并推高上下文
+  const payload = readStdin();
+  const convId = payload.conversationId || 'unknown';
+  const transcriptPath = payload.transcriptPath;
+  if (!transcriptPath) return emitNothing();
+
+  const { parseTranscript, readSettings } = await import(pathToFileURL(tokensPath).href);
   const settings = readSettings();
   if (settings?.hook?.injectSummary !== true) return emitNothing();
-
-  if (!transcriptPath) return emitNothing();
 
   const parsed = parseTranscript(convId, transcriptPath);
   const lastTurn = parsed?.turns?.[parsed.turns.length - 1];
@@ -94,6 +106,7 @@ async function main() {
     `Cache ${fmt(lastTurn.cacheReadTokens)}`,
   ];
   if (lastTurn.toolCalls) parts.push(`${lastTurn.toolCalls} 工具`);
+  if (lastTurn.errorCount) parts.push(`${lastTurn.errorCount} 异常`);
   if (settings.hook.showSessionTotal !== false && parsed) {
     parts.push(`会话累计 ${fmt(parsed.totalTokens)}`);
   }

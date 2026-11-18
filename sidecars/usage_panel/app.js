@@ -2,7 +2,7 @@
  * 用量监控 — 前端控制器
  *
  * 数据诚实原则：界面上每个数字都来自 transcript.jsonl 的真实字段
- * （input_tokens / output_tokens / cache_read_tokens / created_at / tool_calls）。
+ * （input_tokens / output_tokens / cache_read_tokens / created_at / tool_calls / status / error）。
  * 算不出来的指标（首字耗时、提示词切分）不展示，而不是编造。
  */
 
@@ -11,6 +11,7 @@ const ID_RE = /^[0-9a-f-]{8,}$/i;
 const state = {
   tab: 'current',
   data: null,
+  signature: null,
   selectedConvId: null,
   userPinned: false,
   search: '',
@@ -75,6 +76,12 @@ function seg(active, attr, value, label) {
 
 function renderStatCards(el, s) {
   const cacheRate = s.cacheHitRate ?? 0;
+  const errs = s.errorCount || 0;
+  const errTip = errs ? `模型报错 ${s.modelErrors || 0} · 工具失败 ${s.toolErrors || 0}` : '';
+  const callFoot = errs
+    ? `${s.turnCount ?? 0} 轮 · ${s.toolCalls ?? 0} 工具 · <span style="color:var(--c-danger)">${errs} 异常</span>`
+    : `${s.turnCount ?? 0} 轮 · ${s.toolCalls ?? 0} 次工具`;
+
   el.innerHTML = `
     <div class="stat">
       <div class="stat-label"><i class="dot dot-total"></i>总令牌</div>
@@ -94,7 +101,7 @@ function renderStatCards(el, s) {
     <div class="stat">
       <div class="stat-label"><i class="dot dot-output"></i>模型调用</div>
       <div class="stat-value">${s.modelCalls ?? 0}<span class="unit"> 次</span></div>
-      <div class="stat-foot">${s.turnCount ?? 0} 轮 · ${s.toolCalls ?? 0} 次工具</div>
+      <div class="stat-foot" title="${esc(errTip)}">${callFoot}</div>
     </div>
   `;
 }
@@ -112,11 +119,27 @@ function switchTab(tab) {
   document.getElementById('view-history').classList.toggle('active', tab === 'history');
 }
 
+/* ---------------- 常用工具分布 ---------------- */
+
+function renderTopTools(el, tools) {
+  if (!tools || !tools.length) {
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = `
+    <div class="tools-bar">
+      <span class="faint" style="font-size:9.5px">常用工具:</span>
+      ${tools.slice(0, 6).map((t) => `<span class="tool-pill">${esc(t.name)}<b>×${t.count}</b></span>`).join('')}
+    </div>
+  `;
+}
+
 /* ---------------- 当前会话 ---------------- */
 
 function renderCurrent() {
   const banner = document.getElementById('current-banner');
   const cards = document.getElementById('current-cards');
+  const toolsEl = document.getElementById('current-tools');
   const chart = document.getElementById('current-chart');
   const turnsEl = document.getElementById('turns-list');
   const countEl = document.getElementById('turn-count');
@@ -129,7 +152,8 @@ function renderCurrent() {
     banner.innerHTML = `<div class="card"><div class="empty">${
       hostConvId ? '当前会话正在进行首次推理，完成后会自动出现统计' : '还没有任何用量记录'
     }</div></div>`;
-    renderStatCards(cards, { totalTokens: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, billedTokens: 0, modelCalls: 0, turnCount: 0, toolCalls: 0, cacheHitRate: 0 });
+    renderStatCards(cards, { totalTokens: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, billedTokens: 0, modelCalls: 0, turnCount: 0, toolCalls: 0, cacheHitRate: 0, errorCount: 0 });
+    toolsEl.innerHTML = '';
     chart.innerHTML = '';
     countEl.textContent = '';
     turnsEl.innerHTML = '';
@@ -155,7 +179,9 @@ function renderCurrent() {
   `;
 
   renderStatCards(cards, cur);
+  renderTopTools(toolsEl, cur.topTools);
   chart.innerHTML = renderContextChart(cur.turns);
+  bindContextChartEvents(chart);
   countEl.textContent = `${cur.turns.length} 轮`;
 
   if (!cur.turns.length) {
@@ -169,6 +195,7 @@ function renderCurrent() {
     const pOut = total ? (t.outputTokens / total) * 100 : 0;
     const pCache = total ? (t.cacheReadTokens / total) * 100 : 0;
     const title = t.isSubagent ? esc(t.prompt) : `#${t.index} ${esc(t.prompt)}`;
+    const errTip = t.errorCount ? `模型报错 ${t.modelErrors || 0} · 工具失败 ${t.toolErrors || 0}` : '';
 
     return `
       <div class="turn">
@@ -181,9 +208,11 @@ function renderCurrent() {
           <span>Out ${fmt(t.outputTokens)}</span>
           <span>Cache ${fmt(t.cacheReadTokens)}</span>
           <span>${t.modelCalls} 次调用</span>
+          ${t.toolCalls ? `<span>${t.toolCalls} 工具</span>` : ''}
           ${t.durationSec ? `<span>${t.durationSec}s</span>` : ''}
           ${t.phaseSummary ? `<span class="tag tag-phase">${esc(t.phaseSummary)}</span>` : ''}
           ${t.isSubagent ? '<span class="tag tag-sub">子代理</span>' : ''}
+          ${t.errorCount ? `<span class="tag tag-err" title="${esc(errTip)}">⚠ ${t.errorCount} 异常</span>` : ''}
           <span>${fmtClock(t.createdAt)}</span>
         </div>
         <div class="bar">
@@ -196,7 +225,7 @@ function renderCurrent() {
   }).join('');
 }
 
-/* ---------------- 上下文增长图（真实 contextTokens） ---------------- */
+/* ---------------- 上下文增长图（无变形 Y 轴 + 悬停点位） ---------------- */
 
 function renderContextChart(turns) {
   const pts = (turns || []).filter((t) => !t.isSubagent && t.contextTokens > 0);
@@ -207,55 +236,64 @@ function renderContextChart(turns) {
     </div>`;
   }
 
-  const W = 320, H = 116;
-  const padL = 30, padR = 8, padT = 10, padB = 6;
-  const cw = W - padL - padR;
-  const ch = H - padT - padB;
-
   const peak = Math.max(...pts.map((t) => t.contextTokens));
   const maxV = Math.ceil((peak * 1.12) / 10000) * 10000 || 10000;
   const n = pts.length;
 
-  const xy = pts.map((t, i) => ({
-    x: padL + (n > 1 ? (i / (n - 1)) * cw : cw / 2),
-    y: padT + ch - (t.contextTokens / maxV) * ch,
+  // 归一化到 0..100，Y 轴文字与高亮圆点用 HTML 层渲染，不受宽窄拉伸影响
+  const norm = pts.map((t, i) => ({
+    xPct: (i / (n - 1)) * 100,
+    yPct: 100 - (t.contextTokens / maxV) * 100,
+    index: t.index,
+    ctx: t.contextTokens,
+    time: fmtClock(t.endedAt || t.createdAt),
   }));
 
-  let dLine = `M ${xy[0].x.toFixed(1)} ${xy[0].y.toFixed(1)}`;
-  for (let i = 1; i < xy.length; i++) dLine += ` L ${xy[i].x.toFixed(1)} ${xy[i].y.toFixed(1)}`;
-  const dArea = `${dLine} L ${xy[n - 1].x.toFixed(1)} ${padT + ch} L ${xy[0].x.toFixed(1)} ${padT + ch} Z`;
+  let dLine = `M ${norm[0].xPct.toFixed(2)} ${norm[0].yPct.toFixed(2)}`;
+  for (let i = 1; i < norm.length; i++) {
+    dLine += ` L ${norm[i].xPct.toFixed(2)} ${norm[i].yPct.toFixed(2)}`;
+  }
+  const dArea = `${dLine} L 100 100 L 0 100 Z`;
+  const last = norm[n - 1];
+  const defaultReadout = `峰值 ${fmt(peak)}`;
 
-  const gridY = [0, 0.5, 1].map((f) => padT + ch - f * ch);
+  const hitsHtml = norm.map((p) => {
+    const tip = `#${p.index} · ${fmt(p.ctx)} (${p.time})`;
+    return `<div class="chart-hit" data-x="${p.xPct.toFixed(2)}" data-y="${p.yPct.toFixed(2)}" data-tip="${esc(tip)}"></div>`;
+  }).join('');
 
   return `
     <div class="card" style="margin-bottom:8px">
       <div class="row between" style="margin-bottom:5px">
         <span class="card-title">上下文增长</span>
-        <span class="faint" style="font-size:9.5px">峰值 ${fmt(peak)}</span>
+        <span class="faint mono" id="ctx-readout" data-default="${esc(defaultReadout)}" style="font-size:9.5px">${defaultReadout}</span>
       </div>
       <div class="legend" style="margin-bottom:5px">
         <span><i class="dot dot-cache"></i>每轮末次调用的上下文（输入 + 缓存读取）</span>
       </div>
-      <div class="chart-wrap">
-        <svg viewBox="0 0 ${W} ${H}" width="100%" height="100%" preserveAspectRatio="none" style="overflow:visible">
-          <defs>
-            <linearGradient id="ctxGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="var(--c-cache)" stop-opacity=".55"/>
-              <stop offset="100%" stop-color="var(--c-cache)" stop-opacity=".04"/>
-            </linearGradient>
-          </defs>
-          ${gridY.map((y, i) => `
-            <line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}"
-                  stroke="var(--border-strong)" stroke-width=".6"
-                  stroke-dasharray="${i === 0 ? '0' : '2 3'}" opacity=".55"/>
-            <text x="${padL - 4}" y="${(y + 2.5).toFixed(1)}" text-anchor="end"
-                  fill="var(--text-faint)" font-size="7.5">${i === 0 ? fmt(maxV) : i === 1 ? fmt(Math.round(maxV / 2)) : '0'}</text>
-          `).join('')}
-          <path d="${dArea}" fill="url(#ctxGrad)"/>
-          <path d="${dLine}" fill="none" stroke="var(--c-cache)" stroke-width="1.6" stroke-linejoin="round"/>
-          <circle cx="${xy[n - 1].x.toFixed(1)}" cy="${xy[n - 1].y.toFixed(1)}" r="2.8"
-                  fill="var(--c-cache)" stroke="var(--bg-card)" stroke-width="1.4"/>
-        </svg>
+      <div class="chart-stage">
+        <div class="chart-yaxis">
+          <span>${fmt(maxV)}</span>
+          <span>${fmt(Math.round(maxV / 2))}</span>
+          <span>0</span>
+        </div>
+        <div class="chart-plot">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="ctxGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="var(--c-cache)" stop-opacity=".5"/>
+                <stop offset="100%" stop-color="var(--c-cache)" stop-opacity=".04"/>
+              </linearGradient>
+            </defs>
+            <line x1="0" y1="0" x2="100" y2="0" stroke="var(--border-strong)" stroke-width="1" vector-effect="non-scaling-stroke" opacity=".45"/>
+            <line x1="0" y1="50" x2="100" y2="50" stroke="var(--border-strong)" stroke-width="1" vector-effect="non-scaling-stroke" stroke-dasharray="2 3" opacity=".45"/>
+            <line x1="0" y1="100" x2="100" y2="100" stroke="var(--border-strong)" stroke-width="1" vector-effect="non-scaling-stroke" opacity=".55"/>
+            <path d="${dArea}" fill="url(#ctxGrad)"/>
+            <path d="${dLine}" fill="none" stroke="var(--c-cache)" stroke-width="1.8" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+          </svg>
+          <div class="chart-dot" id="ctx-dot" data-default-x="${last.xPct.toFixed(2)}" data-default-y="${last.yPct.toFixed(2)}" style="left:${last.xPct.toFixed(2)}%;top:${last.yPct.toFixed(2)}%"></div>
+          <div class="chart-hits">${hitsHtml}</div>
+        </div>
       </div>
       <div class="chart-axis-labels">
         <span>${esc(fmtClock(pts[0].createdAt))}</span>
@@ -263,6 +301,27 @@ function renderContextChart(turns) {
       </div>
     </div>
   `;
+}
+
+function bindContextChartEvents(container) {
+  const readout = container.querySelector('#ctx-readout');
+  const dot = container.querySelector('#ctx-dot');
+  const hits = container.querySelector('.chart-hits');
+  if (!readout || !dot || !hits) return;
+
+  hits.querySelectorAll('.chart-hit').forEach((hit) => {
+    hit.addEventListener('mouseenter', () => {
+      readout.textContent = hit.dataset.tip || '';
+      dot.style.left = `${hit.dataset.x}%`;
+      dot.style.top = `${hit.dataset.y}%`;
+    });
+  });
+
+  hits.addEventListener('mouseleave', () => {
+    readout.textContent = readout.dataset.default || '';
+    dot.style.left = `${dot.dataset.defaultX}%`;
+    dot.style.top = `${dot.dataset.defaultY}%`;
+  });
 }
 
 /* ---------------- 额度 ---------------- */
@@ -303,7 +362,7 @@ function renderQuotaCard() {
   `;
 }
 
-/* ---------------- 趋势柱状图 ---------------- */
+/* ---------------- 趋势柱状图（对齐基线 + 悬停明细） ---------------- */
 
 function renderTrendCard() {
   const el = document.getElementById('trend-card');
@@ -335,13 +394,23 @@ function renderTrendCard() {
       : `<div class="bars-empty"></div>`;
 
     return `
-      <div class="bars-col ${isNow ? 'is-now' : ''}" title="${esc(tip)}">
-        ${isNow && val > 0 ? `<span class="bars-val">${fmt(val)}</span>` : ''}
-        ${stack}
+      <div class="bars-col ${isNow ? 'is-now' : ''}" data-tip="${esc(tip)}" title="${esc(tip)}">
+        <div class="bars-wrap">
+          ${isNow && val > 0 ? `<span class="bars-val">${fmt(val)}</span>` : ''}
+          ${stack}
+        </div>
         <div class="bars-label">${showLabel ? esc(b.label) : ''}</div>
       </div>
     `;
   }).join('');
+
+  const defaultLegend = `
+    <div class="legend">
+      <span><i class="dot dot-input"></i>输入</span>
+      <span><i class="dot dot-output"></i>输出</span>
+      ${isBilled ? '' : '<span><i class="dot dot-cache"></i>缓存</span>'}
+    </div>
+  `;
 
   el.innerHTML = `
     <div class="row between" style="margin-bottom:6px;flex-wrap:wrap;gap:6px">
@@ -360,13 +429,19 @@ function renderTrendCard() {
         </div>
       </div>
     </div>
-    <div class="legend" style="margin-bottom:4px">
-      <span><i class="dot dot-input"></i>输入</span>
-      <span><i class="dot dot-output"></i>输出</span>
-      ${isBilled ? '' : '<span><i class="dot dot-cache"></i>缓存</span>'}
-    </div>
     <div class="bars">${cols}</div>
+    <div class="trend-foot" id="trend-foot">${defaultLegend}</div>
   `;
+
+  const footEl = el.querySelector('#trend-foot');
+  el.querySelectorAll('.bars-col').forEach((col) => {
+    col.addEventListener('mouseenter', () => {
+      if (footEl) footEl.textContent = col.dataset.tip || '';
+    });
+    col.addEventListener('mouseleave', () => {
+      if (footEl) footEl.innerHTML = defaultLegend;
+    });
+  });
 
   el.querySelectorAll('[data-chart-mode]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -433,6 +508,7 @@ function renderHistory() {
           <span>Cache ${fmt(c.cacheReadTokens)}</span>
           <span>${c.turnCount} 轮 / ${c.modelCalls} 次</span>
           ${c.subagentCount ? `<span class="tag tag-sub">${c.subagentCount} 子代理</span>` : ''}
+          ${c.errorCount ? `<span class="tag tag-err">${c.errorCount} 异常</span>` : ''}
           <span>${fmtTime(c.updatedAt)}</span>
         </div>
         <div class="bar">
@@ -449,6 +525,7 @@ function renderHistory() {
       const id = el.getAttribute('data-conv-id');
       state.selectedConvId = id;
       state.userPinned = Boolean(id && id !== effectiveActiveId);
+      state.signature = null;
       switchTab('current');
       fetchTokens();
     });
@@ -457,14 +534,36 @@ function renderHistory() {
 
 /* ---------------- 设置 ---------------- */
 
+function syncHookRowState(enabled) {
+  const row = document.getElementById('row-session-total');
+  const sub = document.getElementById('opt-session-total');
+  if (row && sub) {
+    row.classList.toggle('is-disabled', !enabled);
+    sub.disabled = !enabled;
+  }
+}
+
+function setInputIfIdle(id, value) {
+  const el = document.getElementById(id);
+  if (el && document.activeElement !== el) {
+    el.value = value;
+  }
+}
+
 function renderSettings() {
   const q = state.data?.quota?.config;
   const h = state.data?.settings?.hook;
-  if (h) document.getElementById('opt-session-total').checked = Boolean(h.showSessionTotal);
+  if (h) {
+    const injectEl = document.getElementById('opt-inject-summary');
+    const totalEl = document.getElementById('opt-session-total');
+    if (injectEl && document.activeElement !== injectEl) injectEl.checked = Boolean(h.injectSummary);
+    if (totalEl && document.activeElement !== totalEl) totalEl.checked = Boolean(h.showSessionTotal);
+    syncHookRowState(Boolean(h.injectSummary));
+  }
   if (q) {
-    document.getElementById('opt-limit-5h').value = q.limit5h;
-    document.getElementById('opt-limit-week').value = q.limitWeekly;
-    document.getElementById('opt-count-mode').value = q.countMode;
+    setInputIfIdle('opt-limit-5h', q.limit5h);
+    setInputIfIdle('opt-limit-week', q.limitWeekly);
+    setInputIfIdle('opt-count-mode', q.countMode);
   }
 }
 
@@ -478,13 +577,19 @@ async function postJson(url, payload) {
 
 async function saveSettings() {
   const statusEl = document.getElementById('settings-status');
+  const injectEnabled = document.getElementById('opt-inject-summary').checked;
+  syncHookRowState(injectEnabled);
+
   const quotaPayload = {
     limit5h: Number(document.getElementById('opt-limit-5h').value),
     limitWeekly: Number(document.getElementById('opt-limit-week').value),
     countMode: document.getElementById('opt-count-mode').value,
   };
   const settingsPayload = {
-    hook: { showSessionTotal: document.getElementById('opt-session-total').checked },
+    hook: {
+      injectSummary: injectEnabled,
+      showSessionTotal: document.getElementById('opt-session-total').checked,
+    },
   };
 
   try {
@@ -497,7 +602,8 @@ async function saveSettings() {
       const settings = await rs.json();
       state.data.quota = { ...state.data.quota, config: quota };
       state.data.settings = settings;
-      renderQuotaCard();
+      state.signature = null;
+      fetchTokens();
       statusEl.textContent = '已保存';
       setTimeout(() => {
         if (statusEl.textContent === '已保存') {
@@ -520,12 +626,17 @@ async function fetchTokens() {
     ? state.selectedConvId
     : (hostConvId || state.selectedConvId || '');
 
-  const qs = targetId ? `?conversationId=${encodeURIComponent(targetId)}` : '';
+  const params = new URLSearchParams();
+  if (targetId) params.set('conversationId', targetId);
+  if (state.signature) params.set('signature', state.signature);
+  const qs = params.toString() ? `?${params.toString()}` : '';
 
   try {
     const res = await apiFetch(`/api/tokens${qs}`);
     if (!res.ok) return;
     let data = await res.json();
+
+    if (data.unchanged) return;
 
     // 独立打开（URL 里没有 conversationId）时跟随最新会话
     if (!state.userPinned && !hostConvId) {
@@ -541,6 +652,7 @@ async function fetchTokens() {
       state.selectedConvId = hostConvId;
     }
 
+    state.signature = data.signature || null;
     state.data = data;
     state.activeConvId = hostConvId || data.activeConversationId || data.conversations?.[0]?.id || null;
 
@@ -572,6 +684,7 @@ document.getElementById('settings-btn').addEventListener('click', () => {
   btn.setAttribute('aria-expanded', String(!nextHidden));
 });
 
+document.getElementById('opt-inject-summary').addEventListener('change', saveSettings);
 document.getElementById('opt-session-total').addEventListener('change', saveSettings);
 document.getElementById('opt-limit-5h').addEventListener('change', saveSettings);
 document.getElementById('opt-limit-week').addEventListener('change', saveSettings);
@@ -581,6 +694,7 @@ document.getElementById('current-banner').addEventListener('click', (e) => {
   if (e.target.closest('#back-active')) {
     state.userPinned = false;
     state.selectedConvId = getHostConvId() || state.data?.conversations?.[0]?.id || null;
+    state.signature = null;
     fetchTokens();
   }
 });

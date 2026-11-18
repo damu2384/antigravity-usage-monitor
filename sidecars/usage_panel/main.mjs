@@ -35,8 +35,17 @@ for (const [route, file, contentType] of [
   }), 'GET');
 }
 
+function buildSignature(all, selectedConvId, quota, settings, nowMs) {
+  const minuteBucket = Math.floor(nowMs / 60_000);
+  const convSig = all.map((c) => `${c.id}:${c.mtimeMs}:${c.fileSize}:${c.modelCalls}`).join('|');
+  return `${minuteBucket}#${selectedConvId}#${JSON.stringify(quota)}#${JSON.stringify(settings)}#${convSig}`;
+}
+
 app.api('/api/tokens', (data = {}) => {
+  const nowMs = Date.now();
   const all = collectConversations();
+  const quota = readQuota();
+  const settings = readSettings();
 
   const explicitConvId = typeof data.conversationId === 'string' && ID_RE.test(data.conversationId)
     ? data.conversationId
@@ -47,6 +56,13 @@ app.api('/api/tokens', (data = {}) => {
   const found = explicitConvId
     ? findConversation(explicitConvId, all)
     : (findConversation(selectedConvId, all) || all[0] || null);
+
+  const resolvedId = found?.id || selectedConvId || '';
+  const signature = buildSignature(all, resolvedId, quota, settings, nowMs);
+
+  if (typeof data.signature === 'string' && data.signature === signature) {
+    return { unchanged: true, signature };
+  }
 
   // stepMetrics 体积大且只供后端聚合，不下发前端
   const current = found ? (({ stepMetrics, ...rest }) => rest)(found) : null;
@@ -60,10 +76,14 @@ app.api('/api/tokens', (data = {}) => {
     acc.modelCalls += c.modelCalls;
     acc.toolCalls += c.toolCalls;
     acc.turnCount += c.turnCount;
+    acc.errorCount += c.errorCount || 0;
+    acc.modelErrors += c.modelErrors || 0;
+    acc.toolErrors += c.toolErrors || 0;
     return acc;
   }, {
     inputTokens: 0, outputTokens: 0, cacheReadTokens: 0,
     billedTokens: 0, totalTokens: 0, modelCalls: 0, toolCalls: 0, turnCount: 0,
+    errorCount: 0, modelErrors: 0, toolErrors: 0,
   });
 
   totals.cacheHitRate = (totals.inputTokens + totals.cacheReadTokens) > 0
@@ -71,14 +91,16 @@ app.api('/api/tokens', (data = {}) => {
     : 0;
 
   return {
+    unchanged: false,
+    signature,
     activeConversationId: activeConvId || null,
     selectedConversationId: selectedConvId || null,
     current,
-    conversations: all.map(({ turns, stepMetrics, ...summary }) => summary),
+    conversations: all.map(({ turns, stepMetrics, topTools, ...summary }) => summary),
     totals,
-    series: computeTimeSeries(all),
-    quota: computeQuotaStats(all, readQuota()),
-    settings: readSettings(),
+    series: computeTimeSeries(all, nowMs),
+    quota: computeQuotaStats(all, quota, nowMs),
+    settings,
   };
 }, 'GET');
 

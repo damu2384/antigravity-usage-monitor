@@ -41,7 +41,11 @@
   <!-- ============ 设置抽屉 ============ -->
   <div class="settings" id="settings-panel" hidden>
     <div class="settings-row">
-      <label for="opt-session-total">Hook 摘要显示「会话累计」</label>
+      <label for="opt-inject-summary" title="注意：当前版本通过 userMessage 注入，会作为消息记录进上下文">开启每轮 Hook 摘要（会略增上下文）</label>
+      <input type="checkbox" id="opt-inject-summary">
+    </div>
+    <div class="settings-row" id="row-session-total">
+      <label for="opt-session-total">Hook 摘要附带「会话累计」</label>
       <input type="checkbox" id="opt-session-total">
     </div>
     <div class="settings-row">
@@ -66,6 +70,7 @@
   <div class="view active" id="view-current">
     <div id="current-banner"></div>
     <div class="stat-grid" id="current-cards"></div>
+    <div id="current-tools"></div>
     <div id="current-chart"></div>
     <div class="card" id="current-turns-card">
       <div class="turns-head">

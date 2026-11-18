@@ -125,10 +125,23 @@ function transcriptPathIn(brainDir, convId) {
 
 function cleanUserText(raw) {
   if (typeof raw !== 'string') return '';
-  let text = raw.trim();
-  const m = text.match(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/i);
-  if (m) text = m[1].trim();
-  return text.replace(/\s+/g, ' ');
+  const blocks = [...raw.matchAll(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/gi)]
+    .map((m) => m[1].trim())
+    .filter(Boolean);
+
+  if (blocks.length > 0) {
+    // 跳过早期 Hook 注入在队列首部的摘要行，优先显示真实用户请求
+    const real = blocks.filter((b) => !/^📊\s*本轮(?:\s|$)/.test(b));
+    const chosen = real.length > 0 ? real : blocks;
+    return chosen.join(' / ').replace(/\s+/g, ' ');
+  }
+
+  return raw
+    .replace(/<ADDITIONAL_METADATA>[\s\S]*?<\/ADDITIONAL_METADATA>/gi, '')
+    .replace(/<USER_SETTINGS_CHANGE>[\s\S]*?<\/USER_SETTINGS_CHANGE>/gi, '')
+    .replace(/<SYSTEM_MESSAGE>[\s\S]*?<\/SYSTEM_MESSAGE>/gi, '')
+    .trim()
+    .replace(/\s+/g, ' ');
 }
 
 /* ------------------------------------------------------------------ */
@@ -139,9 +152,9 @@ function cleanUserText(raw) {
  * 解析一个 transcript.jsonl。
  *
  * 真实字段全部来自日志：
- *   input_tokens / output_tokens / cache_read_tokens / created_at / tool_calls
+ *   input_tokens / output_tokens / cache_read_tokens / created_at / tool_calls / status / error
  *
- * 阶段识别使用日志中的**真实信号**：
+ * 阶段识别使用日志中的真实信号：
  *   - SYSTEM_MESSAGE 含 "Plan mode is off"        -> 进入执行阶段
  *   - SYSTEM_MESSAGE 含 "[plan review]"           -> 回到规划阶段
  *   - tool_calls 含 exit_plan_mode / enter_plan_mode
@@ -177,6 +190,8 @@ export function parseTranscript(convId, filePath) {
   let totalCacheRead = 0;
   let totalCalls = 0;
   let totalToolCalls = 0;
+  let modelErrors = 0;
+  let toolErrors = 0;
   let startedAt = null;
   let updatedAt = null;
   let hasOrchestrator = false;
@@ -197,7 +212,9 @@ export function parseTranscript(convId, filePath) {
       contextTokens: 0, // 该轮最后一步的 input + cache_read，即真实上下文规模
       modelCalls: 0,
       toolCalls: 0,
-      toolNames: [],
+      errorCount: 0,
+      modelErrors: 0,
+      toolErrors: 0,
       durationSec: 0,
       _planCalls: 0,
       _execCalls: 0,
@@ -239,6 +256,18 @@ export function parseTranscript(convId, filePath) {
           inExecPhase = false;
         }
       }
+    } else if (step.type === 'ERROR_MESSAGE') {
+      modelErrors += 1;
+      const t = ensureTurn(step.created_at, null);
+      t.errorCount += 1;
+      t.modelErrors += 1;
+    } else if (step.type === 'GENERIC') {
+      if (step.status === 'ERROR' || step.status === 'INVALID' || Boolean(step.error)) {
+        toolErrors += 1;
+        const t = ensureTurn(step.created_at, null);
+        t.errorCount += 1;
+        t.toolErrors += 1;
+      }
     } else if (step.type === 'PLANNER_RESPONSE') {
       const inp = Number(step.input_tokens) || 0;
       const out = Number(step.output_tokens) || 0;
@@ -274,12 +303,17 @@ export function parseTranscript(convId, filePath) {
         t._lastTs = ts;
       }
 
+      if (step.status === 'ERROR' || step.status === 'INVALID') {
+        modelErrors += 1;
+        t.errorCount += 1;
+        t.modelErrors += 1;
+      }
+
       for (const tc of toolCalls) {
         const name = tc?.name;
         if (!name) continue;
         totalToolCalls += 1;
         t.toolCalls += 1;
-        t.toolNames.push(name);
         toolNameCounts.set(name, (toolNameCounts.get(name) || 0) + 1);
       }
 
@@ -292,7 +326,6 @@ export function parseTranscript(convId, filePath) {
   }
 
   const finalTurns = turns.map(({ _planCalls, _execCalls, _firstTs, _lastTs, ...turn }) => {
-    // 真实耗时：本轮首步到末步的墙钟时间（含模型思考与工具执行）
     const durationSec = _firstTs !== null && _lastTs !== null && _lastTs > _firstTs
       ? Number(((_lastTs - _firstTs) / 1000).toFixed(1))
       : 0;
@@ -313,10 +346,18 @@ export function parseTranscript(convId, filePath) {
     title,
     startedAt: startedAt || (st.birthtime ? st.birthtime.toISOString() : st.mtime.toISOString()),
     updatedAt: updatedAt || st.mtime.toISOString(),
+    mtimeMs: st.mtimeMs,
+    fileSize: st.size,
     turnCount: finalTurns.length,
     modelCalls: totalCalls,
     toolCalls: totalToolCalls,
-    topTools: [...toolNameCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, count]) => ({ name, count })),
+    errorCount: modelErrors + toolErrors,
+    modelErrors,
+    toolErrors,
+    topTools: [...toolNameCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([name, count]) => ({ name, count })),
     inputTokens: totalInput,
     outputTokens: totalOutput,
     cacheReadTokens: totalCacheRead,
@@ -380,6 +421,27 @@ function readChildLinks(brainDir, parentId) {
   }
 
   return links;
+}
+
+function mergeTopTools(baseTools, childToolsList) {
+  const counts = new Map();
+  for (const t of baseTools || []) counts.set(t.name, (counts.get(t.name) || 0) + t.count);
+  for (const list of childToolsList) {
+    for (const t of list || []) counts.set(t.name, (counts.get(t.name) || 0) + t.count);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([name, count]) => ({ name, count }));
+}
+
+function spanSeconds(startIso, endIso) {
+  if (!startIso || !endIso) return 0;
+  const a = Date.parse(startIso);
+  const b = Date.parse(endIso);
+  return Number.isFinite(a) && Number.isFinite(b) && b > a
+    ? Number(((b - a) / 1000).toFixed(1))
+    : 0;
 }
 
 /**
@@ -464,9 +526,14 @@ export function collectConversations() {
     let totalTokens = parsed.totalTokens;
     let modelCalls = parsed.modelCalls;
     let toolCalls = parsed.toolCalls;
+    let errorCount = parsed.errorCount;
+    let modelErrors = parsed.modelErrors;
+    let toolErrors = parsed.toolErrors;
     let updatedAt = parsed.updatedAt;
+    let mtimeMs = parsed.mtimeMs;
     const stepMetrics = [...parsed.stepMetrics];
     const mergedTurns = [...parsed.turns];
+    const childTopTools = [];
 
     for (const { childId, label } of descendants) {
       const child = rawById.get(childId)?.parsed;
@@ -478,8 +545,14 @@ export function collectConversations() {
       totalTokens += child.totalTokens;
       modelCalls += child.modelCalls;
       toolCalls += child.toolCalls;
+      errorCount += child.errorCount;
+      modelErrors += child.modelErrors;
+      toolErrors += child.toolErrors;
+      if (child.mtimeMs > mtimeMs) mtimeMs = child.mtimeMs;
       if (String(child.updatedAt).localeCompare(String(updatedAt)) > 0) updatedAt = child.updatedAt;
       stepMetrics.push(...child.stepMetrics);
+      childTopTools.push(child.topTools);
+
       mergedTurns.push({
         index: mergedTurns.length + 1,
         prompt: `[子代理 · ${label}] ${child.turns[0]?.prompt || child.id.slice(0, 8)}`,
@@ -493,19 +566,33 @@ export function collectConversations() {
         contextTokens: child.turns[child.turns.length - 1]?.contextTokens || 0,
         modelCalls: child.modelCalls,
         toolCalls: child.toolCalls,
-        toolNames: [],
-        durationSec: 0,
+        errorCount: child.errorCount,
+        modelErrors: child.modelErrors,
+        toolErrors: child.toolErrors,
+        durationSec: spanSeconds(child.startedAt, child.updatedAt),
         phaseSummary: null,
         isSubagent: true,
       });
     }
 
+    // 按发生时间排序，避免早期子代理出现在最新轮次顶端
+    mergedTurns.sort((a, b) => {
+      const ta = a.createdAt ? Date.parse(a.createdAt) : 0;
+      const tb = b.createdAt ? Date.parse(b.createdAt) : 0;
+      return ta - tb;
+    });
+
     result.push({
       ...parsed,
       updatedAt,
+      mtimeMs,
       turnCount: mergedTurns.length,
       modelCalls,
       toolCalls,
+      errorCount,
+      modelErrors,
+      toolErrors,
+      topTools: mergeTopTools(parsed.topTools, childTopTools),
       inputTokens,
       outputTokens,
       cacheReadTokens,

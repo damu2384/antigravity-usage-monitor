@@ -26,9 +26,10 @@ Antigravity 在 `transcript.jsonl` 的 `PLANNER_RESPONSE` 步里记录了以下�
 
 ### 1. 当前任务视图
 
-- **四张统计卡**：总令牌、缓存命中（含命中率）、计费用量（输入 + 输出）、模型调用次数（含轮次与工具调用数）。
-- **上下文增长图**：按轮次绘制每轮**末次调用**的 `input_tokens + cache_read_tokens`，即该轮真实的上下文规模。数据点不足 2 个时不绘制。
-- **轮次明细**：每轮的 In / Out / Cache、模型调用次数、真实墙钟耗时（首步到末步）、工具调用，以及三色占比条。
+- **四张统计卡**：总令牌、缓存命中（含命中率）、计费用量（输入 + 输出）、模型调用次数（含轮次、工具调用数与真实异常数）。
+- **常用工具分布**：按真实 `tool_calls` 频次统计展示本任务 Top 工具标签（如 `run_command ×40`）。
+- **上下文增长图**：按轮次绘制每轮**末次调用**的 `input_tokens + cache_read_tokens`，即该轮真实的上下文规模；支持鼠标悬停查看各轮次数值。数据点不足 2 个时不绘制。
+- **轮次明细**：每轮的 In / Out / Cache、模型调用次数、真实墙钟耗时（首步到末步）、工具调用数、真实异常标签（读取 `ERROR_MESSAGE` 与错误/无效状态的 `GENERIC` 步），以及三色占比条。
 - **规划 / 执行阶段**：仅当日志中出现真实信号时才标注 —— `SYSTEM_MESSAGE` 含 `Plan mode is off`（进入执行）、含 `[plan review]`（回到规划），或工具调用中出现 `exit_plan_mode` / `enter_plan_mode`。没有信号就不显示。
 
 ### 2. 全部任务视图
@@ -49,7 +50,7 @@ Antigravity 在 `transcript.jsonl` 的 `PLANNER_RESPONSE` 步里记录了以下�
 1. 文档推荐的 `systemMessage + metadata.user_markdown`（模型读不到、UI 渲染为 Markdown）在 Antigravity 2.32.1 上**每轮都抛** `type mismatch: cannot convert string to message`，`language_server.log` 里连续 80 条，无一次成功。这条路径在当前版本不可用。
 2. 退回 `userMessage`（plain string，类型明确）可以跑通，但它会被当成**真实用户消息**写进轨迹，导致上下文凭空增长、Token 消耗上升 —— 摘要不该有这种代价。
 
-需要时在 `sidecars/usage_panel/settings.json` 显式开启：
+需要时可在面板右上角「设置」里直接勾选开启，或编辑 `sidecars/usage_panel/settings.json`：
 
 ```json
 { "hook": { "showSessionTotal": true, "injectSummary": true } }
@@ -61,7 +62,8 @@ Antigravity 在 `transcript.jsonl` 的 `PLANNER_RESPONSE` 步里记录了以下�
 
 ### 6. 性能
 
-- 以 `mtimeMs + size` 做文件级增量缓存，未变更的 transcript 不会重复解析。
+- 后端以 `mtimeMs + size` 做文件级增量缓存，并生成数据变更签名；无变更时 `/api/tokens` 直接返回 `unchanged: true`，前端跳过 DOM 重建。
+- Hook 默认关闭时零额外模块加载直接短路退出。
 - 面板每 3 秒轮询，页面隐藏时暂停。
 - 静态资源全部本地，无外部 CDN，内网 / 离线可用。
 
